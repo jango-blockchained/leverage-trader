@@ -3,13 +3,13 @@ from decimal import Decimal, ROUND_DOWN, ROUND_UP
 from typing import Optional, Dict, Any
 
 # Assuming MexcHandler is defined in mexc_handler.py
-from src.mexc_handler import MexcHandler
+from src.mexc_handler import MEXCHandler
 import src.config as config # Import config for default percentages
 
 class TradeExecutor:
     """Handles placing and managing trades on the exchange."""
 
-    def __init__(self, mexc_handler: MexcHandler, symbol: str, leverage: int):
+    def __init__(self, mexc_handler: MEXCHandler, symbol: str, leverage: int):
         """
         Initializes the TradeExecutor.
 

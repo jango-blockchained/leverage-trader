@@ -6,7 +6,8 @@ import os
 from decimal import Decimal
 
 from rich.text import Text
-from textual.app import App, ComposeResult, Message
+from textual.app import App, ComposeResult
+from textual.message import Message
 from textual.containers import Container
 from textual.reactive import reactive
 from textual.widgets import DataTable, Footer, Header, RichLog
@@ -14,7 +15,7 @@ from textual.widgets import DataTable, Footer, Header, RichLog
 # Import project modules (adjust paths if necessary)
 import src.config as config
 # Assume these modules exist and have necessary functions/classes
-from src.mexc_handler import MexcHandler
+from src.mexc_handler import MEXCHandler
 from src.data_handler import DataHandler
 from src.indicator_handler import IndicatorHandler
 from src.trade_executor import TradeExecutor
@@ -81,7 +82,7 @@ class Metrics:
 class TradingBotApp(App):
     """A Textual app for the Leverage Trading Bot."""
 
-    CSS_PATH = "main.css" # Load basic CSS
+    CSS_PATH = "../main.css" # Load CSS from parent directory
     BINDINGS = [
         ("q", "quit", "Quit App"),
         (config.MANUAL_TRADE_KEY_UP, "manual_trade('long')", "Manual Long"),
@@ -219,7 +220,7 @@ def run_trading_logic(command_queue: queue.Queue, post_message_callback, stop_ev
     # --- Initialize Handlers --- Initialize these properly!
     app_logger.info("Background thread: Initializing handlers...")
     try:
-        mexc = MexcHandler(api_key=config.MEXC_API_KEY, secret_key=config.MEXC_SECRET_KEY, test_mode=config.ENABLE_TEST_MODE)
+        mexc = MEXCHandler(api_key=config.MEXC_API_KEY, secret_key=config.MEXC_SECRET_KEY, test_mode=config.ENABLE_TEST_MODE)
         data_handler = DataHandler(mexc, symbol=config.DEFAULT_SYMBOL, timeframe=config.DEFAULT_TIMEFRAME)
         indicator_handler = IndicatorHandler()
         trade_executor = TradeExecutor(mexc, symbol=config.DEFAULT_SYMBOL, leverage=config.DEFAULT_LEVERAGE)

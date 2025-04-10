@@ -5,12 +5,12 @@ from decimal import Decimal
 import time
 
 # Assuming MexcHandler is defined in mexc_handler.py
-from src.mexc_handler import MexcHandler # Use direct import
+from src.mexc_handler import MEXCHandler # Corrected case
 
 class DataHandler:
     """Handles fetching and preparing market data."""
 
-    def __init__(self, mexc_handler: MexcHandler, symbol: str, timeframe: str):
+    def __init__(self, mexc_handler: MEXCHandler, symbol: str, timeframe: str):
         """
         Initializes the DataHandler.
 

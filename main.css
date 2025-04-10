@@ -1,0 +1,34 @@
+
+Screen {
+    layout: vertical;
+}
+
+Header {
+    dock: top;
+    height: 1;
+}
+
+Footer {
+    dock: bottom;
+    height: 1;
+}
+
+#main-container {
+    grid-size: 2;
+    grid-gutter: 1 2;
+    grid-rows: auto 1fr; /* Metrics table auto height, Log takes rest */
+    padding: 1; /* Add some padding around the container */
+}
+
+DataTable {
+    width: 1fr;
+    /* Removed fixed height, let it adjust or set via grid */
+    border: thick $accent;
+    margin-bottom: 1; /* Add space below the table */
+}
+
+RichLog {
+    width: 1fr;
+    height: 1fr; /* Take remaining vertical space */
+    border: thick $accent;
+}

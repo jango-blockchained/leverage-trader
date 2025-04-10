@@ -1,0 +1,176 @@
+{
+  "project_name": "Leverage Trading Bot",
+  "goal": "Automated leverage trading bot for MEXC exchange with a Textual TUI.",
+  "status": "Refactored to use Textual UI and separate handler classes. Core logic migrated from previous structure into handlers. Placeholder methods implemented. Ready for testing and potential implementation of further stats tracking (e.g., realized PnL).",
+  "architecture": {
+    "type": "Multi-threaded with Textual UI",
+    "main_thread": "Runs Textual App (TradingBotApp in src/main.py)",
+    "background_thread": "Handles trading logic loop (run_trading_logic in src/main.py)",
+    "communication": "Uses Queues (command_queue, log_queue) and Textual Messages (UpdateMetricsMessage) for inter-thread communication."
+  },
+  "components": [
+    {
+      "name": "src/main.py",
+      "description": "Main application entry point. Sets up and runs the Textual UI (TradingBotApp). Manages the background trading thread, handles UI updates via reactive variables and messages, processes logs, and manages app lifecycle.",
+      "key_classes": [
+        "TradingBotApp",
+        "Metrics",
+        "UpdateMetricsMessage",
+        "ManualTradeMessage",
+        "TextualLogHandler"
+      ],
+      "dependencies": [
+        "textual",
+        "logging",
+        "queue",
+        "threading",
+        "decimal",
+        "time",
+        "os",
+        "src.config",
+        "src.data_handler.DataHandler",
+        "src.indicator_handler.IndicatorHandler",
+        "src.trade_executor.TradeExecutor",
+        "src.stats_handler.StatsHandler",
+        "src.mexc_handler.MexcHandler"
+      ]
+    },
+    {
+      "name": "src/config.py",
+      "description": "Handles configuration loading (API keys via .env) and stores trading parameters (symbol, timeframe, amounts, leverage, SL/TP percentages, etc.), application settings (intervals, test mode), and UI keybindings.",
+      "dependencies": [
+        "os",
+        "dotenv"
+      ]
+    },
+    {
+      "name": "src.mexc_handler.py",
+      "description": "Low-level interface with the MEXC exchange via the ccxt library. Handles direct API calls for fetching market details, OHLCV, ticker price, balance, positions, setting leverage, and placing orders (market with SL/TP). Includes basic error handling and retry logic for fetches.",
+      "key_classes": [
+        "MEXCHandler"
+      ],
+      "dependencies": [
+        "ccxt",
+        "logging",
+        "time",
+        "src.config"
+      ]
+    },
+    {
+      "name": "src/data_handler.py",
+      "description": "Responsible for fetching and processing market data. Uses MexcHandler to fetch OHLCV and ticker data. Provides data in structured formats (pandas DataFrame for OHLCV, Decimal for price). Implements logic to prioritize latest OHLCV close price over ticker fetch.",
+      "key_classes": [
+        "DataHandler"
+      ],
+      "dependencies": [
+        "logging",
+        "pandas",
+        "decimal",
+        "time",
+        "src.mexc_handler.MexcHandler"
+      ]
+    },
+    {
+      "name": "src/indicator_handler.py",
+      "description": "Calculates technical indicators (SMA, RSI, MACD, BBands, Stoch, OBV) on OHLCV DataFrames using pandas-ta. Renames calculated columns for consistency. Generates trading signals ('LONG', 'SHORT', 'NONE') based on a confluence strategy defined within the get_signal method.",
+      "key_classes": [
+        "IndicatorHandler"
+      ],
+      "dependencies": [
+        "logging",
+        "pandas",
+        "pandas-ta",
+        "numpy"
+      ]
+    },
+    {
+      "name": "src/trade_executor.py",
+      "description": "Executes trades based on signals or manual commands. Loads market details (precision, limits) on initialization. Calculates precise order amounts and SL/TP prices based configuration percentages and current price. Interacts with MexcHandler to place/close market orders (with/without SL/TP). Checks SL/TP hit conditions.",
+      "key_classes": [
+        "TradeExecutor"
+      ],
+      "dependencies": [
+        "logging",
+        "decimal",
+        "src.mexc_handler.MexcHandler",
+        "src.config"
+      ]
+    },
+    {
+      "name": "src/stats_handler.py",
+      "description": "Calculates and potentially tracks trading statistics. Currently implements unrealized PnL percentage calculation for open positions. Includes placeholder methods and attributes for tracking realized PnL, trade count, win rate.",
+      "key_classes": [
+        "StatsHandler"
+      ],
+      "dependencies": [
+        "logging",
+        "decimal"
+      ]
+    },
+    {
+      "name": ".env",
+      "description": "Stores MEXC API keys (MEXC_API_KEY, MEXC_SECRET_KEY). Should not be checked into version control (present in .gitignore).",
+      "status": "Required, must be created by user."
+    },
+    {
+      "name": "main.css",
+      "description": "Basic CSS file for styling the Textual application layout and widgets (Header, Footer, DataTable, RichLog).",
+      "status": "Automatically generated by main.py if not present."
+    },
+    {
+      "name": "requirements.txt",
+      "description": "Lists Python package dependencies for the project.",
+      "dependencies": [
+        "python-dotenv",
+        "ccxt==4.3.48",
+        "pandas==2.2.2",
+        "numpy==1.26.4",
+        "pandas-ta==0.3.14b",
+        "textual==0.66.0"
+      ]
+    },
+    {
+      "name": ".gitignore",
+      "description": "Specifies intentionally untracked files that Git should ignore.",
+      "contents_summary": "Ignores .env, __pycache__, .vscode, trading_bot.log, *.egg-info"
+    }
+  ],
+  "key_concepts": [
+    {
+      "name": "Textual TUI",
+      "description": "Provides the main user interface using the Textual library. Includes Header, Footer, DataTable for metrics, and RichLog for logs, laid out using CSS."
+    },
+    {
+      "name": "Metrics Object",
+      "description": "A simple class instance holding the current state displayed in the UI (symbol, price, indicators, prediction, position info, PnL%). Updated via messages from the background thread and watched by a reactive variable in the App."
+    },
+    {
+      "name": "Background Logic Loop (run_trading_logic)",
+      "description": "Runs in a separate thread. Periodically fetches data (DataHandler), calculates indicators/signals (IndicatorHandler), executes trades if conditions met (TradeExecutor), calculates PnL (StatsHandler), checks SL/TP (TradeExecutor), and sends metrics updates back to the UI thread."
+    },
+    {
+      "name": "Handler Classes",
+      "description": "Code is modularized into specific handlers: MexcHandler (API interaction), DataHandler (data fetching/prep), IndicatorHandler (calculations/signals), TradeExecutor (order placement/management), StatsHandler (performance metrics)."
+    },
+    {
+      "name": "Logging",
+      "description": "Uses Python's standard logging module. A custom handler redirects logs from all threads to a queue, which the main UI thread processes and displays in the RichLog widget."
+    },
+    {
+      "name": "Manual Trading",
+      "description": "Supported via keybindings (defined in config.py, default 'up'/'down'). Key presses in the TUI trigger sending a ManualTradeMessage to the background thread via the command_queue."
+    },
+    {
+      "name": "SL/TP Calculation",
+      "description": "Stop-Loss and Take-Profit prices are calculated in TradeExecutor based on percentages set in config.py and the current price at the time of trade execution. Precision is applied based on market details."
+    },
+    {
+      "name": "Configuration Management",
+      "description": "Uses python-dotenv to load API keys from a .env file. Trading parameters and settings are stored in src/config.py."
+    },
+    {
+      "name": "Test Mode",
+      "description": "Can be enabled via ENABLE_TEST_MODE in config.py. MexcHandler attempts to configure ccxt for testnet/sandbox environment, but support/reliability depends on ccxt and MEXC."
+    }
+  ]
+} 
