@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mexc_trading_bot"
+version = "0.1.0"
+description = "A Python trading bot for MEXC Futures."
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT License"} # Assuming MIT based on similar projects, adjust if needed
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "ccxt",
+    "pynput",
+    "rich",
+    "python-dotenv",
+    "pandas",
+    "pandas-ta",
+    # "TA-Lib", # Keep commented out to match requirements.txt
+]
+
+[project.scripts]
+# If you want a command-line entry point later, you can add it here
+# mexc-bot = "main:main"
+
+[project.optional-dependencies]
+test = [
+    "unittest",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"] # Look for packages in the src directory
+
+# Add other sections as needed, e.g., [tool.setuptools] 

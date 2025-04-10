@@ -1,0 +1,8 @@
+ccxt>=4.3.43
+pynput>=1.7.7
+rich>=13.7.1
+python-dotenv>=1.0.1
+pandas>=2.2.2
+pandas-ta>=0.3.14b0
+numpy<2.0
+textual>=0.68.0 
