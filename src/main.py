@@ -20,10 +20,12 @@ from src.data_handler import DataHandler
 from src.indicator_handler import IndicatorHandler
 from src.trade_executor import TradeExecutor
 from src.stats_handler import StatsHandler # If you have one
+from src.widgets import ConnectionStatusWidget
 
 # --- Constants ---
 METRICS_UPDATE_INTERVAL = config.STATS_UPDATE_INTERVAL_SECONDS # Update UI metrics table
 LOG_UPDATE_INTERVAL = 0.5 # How often to check the log queue
+CONNECTION_CHECK_INTERVAL = 10  # How often to check API connection
 
 # --- Logging Setup ---
 log_queue = queue.Queue()
@@ -73,6 +75,20 @@ class NotificationMessage(Message):
         super().__init__()
         self.message = message
         self.level = level
+
+class ConnectionStatusMessage(Message):
+    """Message to update connection status in the UI."""
+    def __init__(self, status, error_message=""):
+        """
+        Initialize connection status message.
+        
+        Args:
+            status: Connection status ("connected", "connecting", "disconnected", "error")
+            error_message: Optional error message if status is "error"
+        """
+        super().__init__()
+        self.status = status
+        self.error_message = error_message
 
 class ManualTradeMessage:
     """Command message for the background thread."""
@@ -157,6 +173,7 @@ class TradingBotApp(App):
         self.metrics_table = DataTable(zebra_stripes=True)
         self.notification_widget = NotificationWidget(classes="notification")
         self.notification_widget.visible = False  # Hide initially
+        self.connection_status_widget = ConnectionStatusWidget()
         self.background_thread = None
         self.stop_event = threading.Event()
         self.command_queue = queue.Queue() # Queue for app -> background thread commands
@@ -164,6 +181,7 @@ class TradingBotApp(App):
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
         yield Header()
+        yield self.connection_status_widget
         yield self.notification_widget
         with Container(id="main-container"):
             yield self.metrics_table
@@ -187,6 +205,10 @@ class TradingBotApp(App):
         self.metrics_table.add_column("Metric", key="metric")
         self.metrics_table.add_column("Value", key="value")
         self.update_metrics_table() # Initial population
+
+        # Initialize connection status
+        self.connection_status_widget.update_status("connecting")
+        app_logger.info("Connecting to MEXC API...")
 
         # Start background thread
         self.background_thread = threading.Thread(
@@ -245,6 +267,19 @@ class TradingBotApp(App):
         """Handles notification messages."""
         app_logger.debug(f"Received notification: {message.message} ({message.level})")
         self.notification_widget.show_notification(message.message, message.level)
+        
+    def on_connection_status_message(self, message: ConnectionStatusMessage) -> None:
+        """Handles connection status updates."""
+        app_logger.debug(f"Received connection status update: {message.status}")
+        self.connection_status_widget.update_status(message.status, message.error_message)
+        
+        # Also show a notification for important status changes
+        if message.status == "connected":
+            self.notification_widget.show_notification("Connected to MEXC API", "success")
+        elif message.status == "error":
+            self.notification_widget.show_notification(f"Connection error: {message.error_message}", "error")
+        elif message.status == "disconnected":
+            self.notification_widget.show_notification("Disconnected from MEXC API", "warning")
 
     # --- Watch Methods ---
     def watch_current_metrics(self, old_metrics: Metrics, new_metrics: Metrics) -> None:
@@ -286,6 +321,12 @@ def run_trading_logic(command_queue: queue.Queue, post_message_callback, stop_ev
     """
     # --- Initialize Handlers --- Initialize these properly!
     app_logger.info("Background thread: Initializing handlers...")
+    mexc = None
+    data_handler = None
+    indicator_handler = None
+    trade_executor = None
+    stats_handler = None
+    
     try:
         mexc = MEXCHandler(api_key=config.MEXC_API_KEY, secret_key=config.MEXC_SECRET_KEY, test_mode=config.ENABLE_TEST_MODE)
         data_handler = DataHandler(mexc, symbol=config.DEFAULT_SYMBOL, timeframe=config.DEFAULT_TIMEFRAME)
@@ -293,14 +334,15 @@ def run_trading_logic(command_queue: queue.Queue, post_message_callback, stop_ev
         trade_executor = TradeExecutor(mexc, symbol=config.DEFAULT_SYMBOL, leverage=config.DEFAULT_LEVERAGE)
         stats_handler = StatsHandler() # Initialize your stats handler
         app_logger.info("Background thread: Handlers initialized successfully.")
+        post_message_callback(ConnectionStatusMessage("connected"))
     except Exception as e:
         app_logger.critical(f"Background thread: Failed to initialize handlers: {e}. Stopping thread.")
-        # Optionally post a critical error message to the UI
-        # post_message_callback(LogMessage(f"CRITICAL ERROR: Handler Initialization Failed: {e}"))
+        post_message_callback(ConnectionStatusMessage("error", str(e)))
         return # Stop the thread if handlers fail
 
     last_data_fetch = 0
     last_prediction_run = 0
+    last_connection_check = 0
     current_position = None # Track current position state (e.g., dict from trade_executor)
     ohlcv = None # Store fetched OHLCV data
 
@@ -348,6 +390,21 @@ def run_trading_logic(command_queue: queue.Queue, post_message_callback, stop_ev
         except Exception as e:
             app_logger.error(f"Background thread: Error processing command: {e}")
 
+        # --- Check API connection periodically ---
+        if now - last_connection_check >= CONNECTION_CHECK_INTERVAL:
+            try:
+                # Simple check - try to get the current price directly
+                connection_test = mexc.get_current_price(config.DEFAULT_SYMBOL)
+                if connection_test:
+                    post_message_callback(ConnectionStatusMessage("connected"))
+                else:
+                    app_logger.warning("Background thread: Connection test failed - null result.")
+                    post_message_callback(ConnectionStatusMessage("error", "API returned null result"))
+            except Exception as conn_error:
+                app_logger.error(f"Background thread: Connection test failed: {conn_error}")
+                post_message_callback(ConnectionStatusMessage("error", str(conn_error)))
+            
+            last_connection_check = now
 
         # --- Fetch Data Periodically ---
         if now - last_data_fetch >= config.DATA_FETCH_INTERVAL_SECONDS:
@@ -374,6 +431,7 @@ def run_trading_logic(command_queue: queue.Queue, post_message_callback, stop_ev
 
             except Exception as e:
                 app_logger.error(f"Background thread: Error fetching data: {e}")
+                post_message_callback(ConnectionStatusMessage("error", f"Data fetch error: {str(e)}"))
                 time.sleep(config.DATA_FETCH_INTERVAL_SECONDS / 2) # Wait a bit before retrying
 
 
@@ -394,7 +452,6 @@ def run_trading_logic(command_queue: queue.Queue, post_message_callback, stop_ev
                      metrics.rsi = None
                      prediction = "HOLD" # Default to HOLD if calculation fails
                 # --- End Calculate Indicators & Predict ---
-
 
                 # --- Execute Automated Trade (if prediction warrants and no position) ---
                 if prediction in ['LONG', 'SHORT'] and not current_position: # Example logic: Only trade if flat
@@ -435,84 +492,14 @@ def run_trading_logic(command_queue: queue.Queue, post_message_callback, stop_ev
                         app_logger.debug(f"Signal {prediction} contradicts current {current_side} position. Holding.")
                 # --- End Execute Automated Trade ---
 
-                # Removed dummy data assignments
+                # Update UI with current metrics
+                post_message_callback(UpdateMetricsMessage(metrics))
                 last_prediction_run = now
-
             except Exception as e:
-                app_logger.error(f"Background thread: Error in prediction/trade logic: {e}")
+                app_logger.error(f"Background thread: Error in prediction logic: {e}")
+                post_message_callback(NotificationMessage(f"Prediction error: {str(e)}", "error"))
 
-
-        # --- Update PnL if position exists --- Ensure current price is available
-        if current_position and metrics.current_price:
-             try:
-                 # --- Calculate PnL --- Integrate with StatsHandler
-                 # Assume stats_handler.calculate_pnl returns a dict like {'pnl_percent': float}
-                 pnl_info = stats_handler.calculate_pnl(current_position, metrics.current_price)
-                 if pnl_info and 'pnl_percent' in pnl_info:
-                      metrics.pnl_percent = pnl_info['pnl_percent']
-                 else:
-                      app_logger.warning("Background thread: Could not calculate PnL.")
-                      metrics.pnl_percent = None
-                 # --- End Calculate PnL ---
-             except Exception as pnl_error:
-                  app_logger.error(f"Background thread: Error calculating PnL: {pnl_error}")
-                  metrics.pnl_percent = None
-        else:
-             # Ensure PnL is None when no position or no current price
-             metrics.pnl_percent = None
-
-
-        # --- Send metrics update to the main thread ---
-        metrics.timestamp = time.time()
-        try:
-            # Create a copy to avoid potential race conditions if metrics object is modified elsewhere
-            metrics_copy = Metrics()
-            metrics_copy.symbol = metrics.symbol
-            metrics_copy.current_price = metrics.current_price
-            metrics_copy.rsi = metrics.rsi
-            metrics_copy.prediction = metrics.prediction
-            metrics_copy.position_size = metrics.position_size
-            metrics_copy.entry_price = metrics.entry_price
-            metrics_copy.pnl_percent = metrics.pnl_percent
-            metrics_copy.timestamp = metrics.timestamp
-
-            post_message_callback(UpdateMetricsMessage(metrics_copy))
-        except Exception as e:
-             app_logger.error(f"Background thread: Error sending metrics update: {e}")
-
-
-        # --- Check SL/TP (if position exists) --- Ensure current price is available
-        if current_position and metrics.current_price:
-            try:
-                # --- Check and close position if SL/TP hit --- Integrate with TradeExecutor
-                close_reason = trade_executor.check_sl_tp(current_position, metrics.current_price)
-                if close_reason:
-                    app_logger.info(f"Closing position due to {close_reason}")
-                    # Send notification for SL/TP trigger
-                    post_message_callback(NotificationMessage(f"Position {close_reason} triggered", "warning"))
-                    try:
-                        close_result = trade_executor.close_position(current_position) # Assumes close_position needs position info
-                        if close_result:
-                            app_logger.info(f"Position closed successfully via SL/TP check: {close_result}")
-                            current_position = None
-                            metrics.position_size = None
-                            metrics.entry_price = None
-                            metrics.pnl_percent = None # Reset PnL after closing
-                            metrics.prediction = f"Closed ({close_reason})" # Update status
-                            # Send notification for successful position close
-                            post_message_callback(NotificationMessage(f"Position closed via {close_reason}", "success"))
-                        else:
-                            app_logger.error("Failed to close position after SL/TP hit detected.")
-                            # Send notification for failed position close
-                            post_message_callback(NotificationMessage("Failed to close position after SL/TP trigger", "error"))
-                    except Exception as close_error:
-                        app_logger.error(f"Error closing position after SL/TP hit: {close_error}")
-                # --- End Check SL/TP ---
-            except Exception as sltp_error:
-                 app_logger.error(f"Background thread: Error checking SL/TP: {sltp_error}")
-
-
-        # Small sleep to prevent high CPU usage in the loop
+        # Slight delay to avoid burning CPU
         time.sleep(0.1)
 
     app_logger.info("Background thread: Stopping.")
