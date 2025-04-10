@@ -10,7 +10,7 @@ from textual.app import App, ComposeResult
 from textual.message import Message
 from textual.containers import Container
 from textual.reactive import reactive
-from textual.widgets import DataTable, Footer, Header, RichLog
+from textual.widgets import DataTable, Footer, Header, RichLog, Static
 
 # Import project modules (adjust paths if necessary)
 import src.config as config
@@ -60,10 +60,69 @@ class LogMessage(Message):
         super().__init__()
         self.message = message
 
+class NotificationMessage(Message):
+    """Message to display a notification in the UI."""
+    def __init__(self, message, level="info"):
+        """
+        Initialize notification message.
+        
+        Args:
+            message: The notification text
+            level: Severity level ("info", "warning", "error", "success")
+        """
+        super().__init__()
+        self.message = message
+        self.level = level
+
 class ManualTradeMessage:
     """Command message for the background thread."""
     def __init__(self, side):
         self.side = side # 'long' or 'short'
+
+# --- Notification Widget ---
+class NotificationWidget(Static):
+    """Widget for displaying notifications and alerts."""
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.auto_hide = True
+        self.notification_queue = []
+        
+    def show_notification(self, message, level="info"):
+        """
+        Display a notification with the specified level.
+        
+        Args:
+            message: The notification text
+            level: Severity level ("info", "warning", "error", "success")
+        """
+        # Map levels to styles
+        style_map = {
+            "info": "bold blue",
+            "warning": "bold yellow",
+            "error": "bold red on white",
+            "success": "bold green",
+        }
+        
+        style = style_map.get(level, "bold blue")
+        self.update(f"[{style}]{message}[/]")
+        
+        # Make widget visible
+        self.visible = True
+        
+        # Auto-hide after a delay
+        if self.auto_hide:
+            self.app.set_timer(5, self.clear_notification)
+    
+    def clear_notification(self):
+        """Clear the current notification."""
+        self.visible = False
+        self.update("")
+        
+        # If there are queued notifications, show the next one
+        if self.notification_queue:
+            next_notification = self.notification_queue.pop(0)
+            self.show_notification(next_notification["message"], next_notification["level"])
 
 # --- Metrics Data Structure ---
 # Example - adjust based on actual data needed
@@ -96,6 +155,8 @@ class TradingBotApp(App):
         super().__init__()
         self.log_widget = RichLog(highlight=True, markup=True)
         self.metrics_table = DataTable(zebra_stripes=True)
+        self.notification_widget = NotificationWidget(classes="notification")
+        self.notification_widget.visible = False  # Hide initially
         self.background_thread = None
         self.stop_event = threading.Event()
         self.command_queue = queue.Queue() # Queue for app -> background thread commands
@@ -103,6 +164,7 @@ class TradingBotApp(App):
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
         yield Header()
+        yield self.notification_widget
         with Container(id="main-container"):
             yield self.metrics_table
             yield self.log_widget
@@ -178,6 +240,11 @@ class TradingBotApp(App):
         """Handles metric updates from the background thread."""
         app_logger.debug(f"Received metrics update: {message.metrics}")
         self.current_metrics = message.metrics # Update reactive variable
+        
+    def on_notification_message(self, message: NotificationMessage) -> None:
+        """Handles notification messages."""
+        app_logger.debug(f"Received notification: {message.message} ({message.level})")
+        self.notification_widget.show_notification(message.message, message.level)
 
     # --- Watch Methods ---
     def watch_current_metrics(self, old_metrics: Metrics, new_metrics: Metrics) -> None:
@@ -261,12 +328,18 @@ def run_trading_logic(command_queue: queue.Queue, post_message_callback, stop_ev
                         metrics.entry_price = result.get('entry_price') # Adjust keys
                         metrics.prediction = f"Manual {command.side.upper()}" # Update status
                         metrics.pnl_percent = None # Reset PnL on new trade
+                        # Send notification for successful trade
+                        post_message_callback(NotificationMessage(f"Manual {command.side.upper()} trade executed", "success"))
                     else:
                         app_logger.error(f"Manual {command.side} trade failed.")
+                        # Send notification for failed trade
+                        post_message_callback(NotificationMessage(f"Manual {command.side.upper()} trade failed", "error"))
                         # Keep old prediction/state or set to failed?
                         # metrics.prediction = f"Manual {command.side.upper()} FAILED"
                 except Exception as trade_error:
                     app_logger.error(f"Background thread: Error executing manual trade: {trade_error}")
+                    # Send notification for error
+                    post_message_callback(NotificationMessage(f"Error executing trade: {str(trade_error)}", "error"))
                 # --- End Execute Manual Trade ---
 
             command_queue.task_done()
@@ -342,10 +415,16 @@ def run_trading_logic(command_queue: queue.Queue, post_message_callback, stop_ev
                             metrics.position_size = trade_result.get('size') # Adjust keys
                             metrics.entry_price = trade_result.get('entry_price') # Adjust keys
                             metrics.pnl_percent = None # Reset PnL on new trade
+                            # Send notification for successful automated trade
+                            post_message_callback(NotificationMessage(f"Automated {prediction} trade executed", "success"))
                         else:
                             app_logger.error(f"Automated {prediction} trade failed.")
+                            # Send notification for failed automated trade
+                            post_message_callback(NotificationMessage(f"Automated {prediction} trade failed", "error"))
                     except Exception as auto_trade_error:
                          app_logger.error(f"Background thread: Error executing automated trade: {auto_trade_error}")
+                         # Send notification for error
+                         post_message_callback(NotificationMessage(f"Error executing trade: {str(auto_trade_error)}", "error"))
                     # else:
                     #    app_logger.debug(f"Automated {prediction} signal ignored: Predicted move too small.")
                 elif current_position and prediction != 'HOLD':
@@ -409,6 +488,8 @@ def run_trading_logic(command_queue: queue.Queue, post_message_callback, stop_ev
                 close_reason = trade_executor.check_sl_tp(current_position, metrics.current_price)
                 if close_reason:
                     app_logger.info(f"Closing position due to {close_reason}")
+                    # Send notification for SL/TP trigger
+                    post_message_callback(NotificationMessage(f"Position {close_reason} triggered", "warning"))
                     try:
                         close_result = trade_executor.close_position(current_position) # Assumes close_position needs position info
                         if close_result:
@@ -418,9 +499,12 @@ def run_trading_logic(command_queue: queue.Queue, post_message_callback, stop_ev
                             metrics.entry_price = None
                             metrics.pnl_percent = None # Reset PnL after closing
                             metrics.prediction = f"Closed ({close_reason})" # Update status
+                            # Send notification for successful position close
+                            post_message_callback(NotificationMessage(f"Position closed via {close_reason}", "success"))
                         else:
                             app_logger.error("Failed to close position after SL/TP hit detected.")
-                            # Maybe retry closing? Or leave position state as is?
+                            # Send notification for failed position close
+                            post_message_callback(NotificationMessage("Failed to close position after SL/TP trigger", "error"))
                     except Exception as close_error:
                         app_logger.error(f"Error closing position after SL/TP hit: {close_error}")
                 # --- End Check SL/TP ---
@@ -451,6 +535,14 @@ Header {
 Footer {
     dock: bottom;
     height: 1;
+}
+
+.notification {
+    background: $surface;
+    height: 1;
+    dock: top;
+    text-align: center;
+    margin: 0 2;
 }
 
 #main-container {

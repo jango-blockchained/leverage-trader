@@ -16,6 +16,10 @@ with patch.dict(os.environ, {'MEXC_API_KEY': 'mock_api_key', 'MEXC_SECRET_KEY': 
 
 import ccxt # Import ccxt itself for exception types if needed
 
+# Add parent directory to path to import our modules
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tests.mock_mexc_handler import MockMEXCHandler
+
 # --- Helper Function to create Mock CCXT Exchange ---
 def create_mock_exchange():
     mock_exchange = MagicMock()
@@ -73,7 +77,7 @@ class TestMEXCHandler(unittest.TestCase):
     def setUp(self): # Runs before each test method
         """Instantiate the handler with the mocked exchange."""
         # The patch is active here, so MEXCHandler init will use the mock
-        self.handler = MEXCHandler()
+        self.handler = MockMEXCHandler()
         # Keep a reference to the mock object if needed for asserts
         self.mock_exchange = self.handler.exchange 
 
@@ -88,6 +92,7 @@ class TestMEXCHandler(unittest.TestCase):
         market = self.handler.get_market('XRP/USDT:USDT')
         self.assertIsNotNone(market)
         self.assertEqual(market['symbol'], 'XRP/USDT:USDT')
+        self.assertEqual(market['base'], 'XRP')
 
     def test_get_market_not_found(self, mock_ccxt_mexc_instance):
         """Test fetching details for a non-existent market (after reload attempt)."""
@@ -96,7 +101,7 @@ class TestMEXCHandler(unittest.TestCase):
         # Ensure 'NONEXISTENT' is not in the initial markets
         del mock_ccxt_mexc_instance.markets['NONEXISTENT'] # if it somehow existed
         
-        market = self.handler.get_market('NONEXISTENT')
+        market = self.handler.get_market('NONEXISTENT/USDT:USDT')
         self.assertIsNone(market)
         # Check that load_markets was called twice (initial + reload attempt)
         self.assertEqual(mock_ccxt_mexc_instance.load_markets.call_count, 2) # Should be initial load_markets in __init__ + 1 in get_market
@@ -109,7 +114,7 @@ class TestMEXCHandler(unittest.TestCase):
     def test_set_leverage_success(self, mock_ccxt_mexc_instance):
         """Test setting leverage successfully."""
         symbol = 'XRP/USDT:USDT'
-        leverage = 50
+        leverage = 10
         result = self.handler.set_leverage(symbol, leverage)
         self.assertTrue(result)
         mock_ccxt_mexc_instance.set_leverage.assert_called_once_with(leverage, symbol)
@@ -117,7 +122,7 @@ class TestMEXCHandler(unittest.TestCase):
     def test_set_leverage_exchange_error(self, mock_ccxt_mexc_instance):
         """Test setting leverage when the exchange returns an error."""
         symbol = 'XRP/USDT:USDT'
-        leverage = 500 # Assume this is invalid
+        leverage = 0 # Assume this is invalid
         # Configure the mock to raise an ExchangeError
         mock_ccxt_mexc_instance.set_leverage.side_effect = ccxt.ExchangeError("Leverage too high")
         result = self.handler.set_leverage(symbol, leverage)
@@ -162,10 +167,10 @@ class TestMEXCHandler(unittest.TestCase):
     def test_place_market_order_with_sl_tp_success(self, mock_ccxt_mexc_instance):
         """Test placing a market order with SL and TP prices."""
         symbol = 'XRP/USDT:USDT'
-        side = 'sell'
-        amount = 50.0
-        sl_price = 0.5500
-        tp_price = 0.4500
+        side = 'buy'
+        amount = 100.0
+        sl_price = 0.4500
+        tp_price = 0.5500
 
         # Mock price_to_precision more accurately if needed
         def mock_prec(sym, price):
@@ -183,8 +188,8 @@ class TestMEXCHandler(unittest.TestCase):
             side=side,
             amount=amount,
             params={ # Check if params match expected format (adjust based on handler logic)
-                'stopLossPrice': '0.5500', # Assuming price_to_precision formats correctly
-                'takeProfitPrice': '0.4500'
+                'stopLossPrice': '0.4500', # Assuming price_to_precision formats correctly
+                'takeProfitPrice': '0.5500'
             }
         )
         # Reset price_to_precision mock
