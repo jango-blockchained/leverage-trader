@@ -35,6 +35,7 @@ ENABLE_TEST_MODE = True # Set to True to attempt using MEXC testnet (if supporte
 DATA_FETCH_INTERVAL_SECONDS = 5 # How often to fetch new market data
 PREDICTION_INTERVAL_SECONDS = 1 # How often to run the prediction logic
 STATS_UPDATE_INTERVAL_SECONDS = 10 # How often to update and display statistics
+CURRENT_THEME = "default_val" # Default theme for the application
 
 # --- Keyboard Input ---
 MANUAL_TRADE_KEY_UP = 'up'      # Key for manual long trade

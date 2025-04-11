@@ -225,6 +225,75 @@ class IndicatorHandler:
             logging.debug(f"No clear signal based on current strategy rules.")
             return 'NONE'
 
+    def generate_signal(self, indicators) -> str:
+        """
+        Generate a trading signal from the calculated indicators.
+        
+        Args:
+            indicators: The indicators data, either a dictionary or DataFrame
+            
+        Returns:
+            'LONG', 'SHORT', or 'HOLD'
+        """
+        # Check if indicators is a DataFrame, if so convert to dict 
+        if isinstance(indicators, pd.DataFrame):
+            if len(indicators) == 0:
+                logging.warning("Empty DataFrame received in generate_signal.")
+                return 'HOLD'
+                
+            # Extract the latest row's indicators as a dictionary
+            latest = indicators.iloc[-1].to_dict()
+            
+            # Check if essential indicators exist and are not NaN
+            required_indicators = ['rsi', 'macd', 'macdsignal', 'slowk', 'slowd']
+            if not all(ind in latest and not pd.isna(latest[ind]) for ind in required_indicators):
+                logging.warning("Missing or NaN values in required indicators.")
+                return 'HOLD'
+                
+            # Process using dictionary-based logic
+            return self._analyze_indicators(latest)
+        
+        # If indicators is already a dictionary (not DataFrame), use directly
+        elif isinstance(indicators, dict):
+            # Check if essential indicators exist and are not None
+            required_indicators = ['rsi', 'macd', 'macdsignal', 'slowk', 'slowd']
+            if not all(ind in indicators and indicators[ind] is not None for ind in required_indicators):
+                logging.warning("Missing values in required indicators dict.")
+                return 'HOLD'
+                
+            return self._analyze_indicators(indicators)
+            
+        else:
+            logging.error(f"Unexpected type for indicators: {type(indicators)}")
+            return 'HOLD'
+    
+    def _analyze_indicators(self, indicators: dict) -> str:
+        """
+        Analyze dictionary of indicators and return a signal.
+        
+        Args:
+            indicators: Dictionary of indicator values
+            
+        Returns:
+            'LONG', 'SHORT', or 'HOLD'
+        """
+        # Simple example logic - implement your actual strategy here
+        rsi = indicators.get('rsi', 50)
+        macd = indicators.get('macd', 0)
+        macd_signal = indicators.get('macdsignal', 0)
+        slowk = indicators.get('slowk', 50)
+        slowd = indicators.get('slowd', 50)
+        
+        # Example strategy:
+        # LONG if RSI < 30 (oversold) and MACD is above signal line
+        # SHORT if RSI > 70 (overbought) and MACD is below signal line
+        if rsi < 30 and macd > macd_signal:
+            return 'LONG'
+        elif rsi > 70 and macd < macd_signal:
+            return 'SHORT'
+        else:
+            return 'HOLD'
+
 # --- Example Usage (for testing within this file) ---
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
